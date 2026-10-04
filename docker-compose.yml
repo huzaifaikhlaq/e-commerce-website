@@ -1,0 +1,106 @@
+services:
+  # =========================
+  # Redis
+  # =========================
+
+  redis:
+    image: redis:7-alpine
+    container_name: voire-redis
+
+    restart: unless-stopped
+
+    command: redis-server --appendonly yes
+
+    volumes:
+      - redis-data:/data
+
+    networks:
+      - voire-network
+
+    ports:
+      - "6379:6379"
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # =========================
+  # Backend API
+  # =========================
+
+  backend:
+    build:
+      context: ./clothing-website-backend
+
+    container_name: voire-backend
+
+    restart: unless-stopped
+
+    env_file:
+      - ./clothing-website-backend/.env
+
+    environment:
+      PORT: 2009
+      FRONTEND_URL: http://localhost:8080
+
+      # Docker backend talks to Docker Redis
+      REDIS_URL: redis://redis:6379
+
+    expose:
+      - "2009"
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:2009/').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+    networks:
+      - voire-network
+
+  # =========================
+  # Frontend + Nginx
+  # =========================
+
+  frontend:
+    build:
+      context: ./clothing-website-frontend
+
+      args:
+        VITE_API_URL: /api
+        VITE_CLOUDINARY_CLOUD_NAME: ${VITE_CLOUDINARY_CLOUD_NAME:-}
+        VITE_CLOUDINARY_UPLOAD_PRESET: ${VITE_CLOUDINARY_UPLOAD_PRESET:-}
+
+    container_name: voire-frontend
+
+    restart: unless-stopped
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    ports:
+      - "8080:80"
+
+    networks:
+      - voire-network
+
+networks:
+  voire-network:
+    driver: bridge
+
+volumes:
+  redis-data:
